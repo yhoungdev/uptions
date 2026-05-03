@@ -2,6 +2,8 @@ mod error;
 mod services;
 mod dtos;
 pub mod utils;
+mod app;
+mod integrations;
 
 use axum::{Router, routing::get};
 use tokio::net::TcpListener;
