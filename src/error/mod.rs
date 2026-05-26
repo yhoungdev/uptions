@@ -48,8 +48,8 @@ impl IntoResponse for AppError {
     }
 }
 
-impl From<diesel::r2d2::PoolError> for AppError {
-    fn from(error: diesel::r2d2::PoolError) -> Self {
+impl From<sea_orm::DbErr> for AppError {
+    fn from(error: sea_orm::DbErr) -> Self {
         Self::DatabaseError(error.to_string())
     }
 }
