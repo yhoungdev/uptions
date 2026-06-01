@@ -23,7 +23,7 @@ impl AppState {
         Migrator::up(&db, None).await?;
 
         Ok(Self {
-            auth_service: AuthService::new(),
+            auth_service: AuthService::new(db.clone()),
             db: db.clone(),
             polymarket_client: PolymarketClient::new(&config),
             user_service: UserService::new(db),

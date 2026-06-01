@@ -11,7 +11,7 @@ use tracing::Level;
 use crate::{
     app::docs::{openapi_json, swagger_ui},
     app::state::AppState,
-    auth::handlers::{create_challenge, current_user, verify_challenge},
+    auth::handlers::{connect_polymarket, create_challenge, current_user, verify_challenge},
     polymarket::handlers::fetch_markets,
     response::{ApiResponse, ok},
     users::handler::join_waitlist,
@@ -35,6 +35,7 @@ fn api_v1_router() -> Router<AppState> {
         .route("/auth/challenge", post(create_challenge))
         .route("/auth/verify", post(verify_challenge))
         .route("/auth/me", get(current_user))
+        .route("/venue-connections/polymarket", post(connect_polymarket))
         .route("/polymarket/markets", get(fetch_markets))
         .route("/users/waitlist", post(join_waitlist))
 }

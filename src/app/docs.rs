@@ -9,7 +9,8 @@ use utoipa::{
 
 use crate::{
     auth::dto::{
-        AuthUserResponse, CreateChallengeRequest, CreateChallengeResponse, VerifyChallengeRequest,
+        AuthUserResponse, ConnectPolymarketRequest, CreateChallengeRequest,
+        CreateChallengeResponse, VenueConnectionResponse, VerifyChallengeRequest,
         VerifyChallengeResponse,
     },
     error::ErrorResponse,
@@ -25,6 +26,7 @@ use crate::{
         crate::auth::handlers::create_challenge,
         crate::auth::handlers::verify_challenge,
         crate::auth::handlers::current_user,
+        crate::auth::handlers::connect_polymarket,
         crate::polymarket::handlers::fetch_markets,
         crate::users::handler::join_waitlist
     ),
@@ -34,12 +36,15 @@ use crate::{
             ApiResponse<AuthUserResponse>,
             ApiResponse<CreateChallengeResponse>,
             ApiResponse<String>,
+            ApiResponse<VenueConnectionResponse>,
             ApiResponse<VerifyChallengeResponse>,
             ApiResponse<WaitlistResponse>,
+            ConnectPolymarketRequest,
             CreateChallengeRequest,
             CreateChallengeResponse,
             ErrorResponse,
             MarketsQuery,
+            VenueConnectionResponse,
             VerifyChallengeRequest,
             VerifyChallengeResponse,
             WaitlistResponse,
@@ -50,7 +55,7 @@ use crate::{
     info(
         title = "Uptions Backend API",
         version = "1.0.0",
-        description = "Versioned V1 backend endpoints for wallet authentication and Polymarket market discovery."
+        description = "Versioned V1 backend endpoints for wallet identity, venue connections, and market discovery."
     )
 )]
 struct ApiDoc;
