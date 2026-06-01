@@ -1,4 +1,5 @@
 use serde::{Deserialize, Serialize};
+use serde_json::Value;
 use utoipa::ToSchema;
 
 #[derive(Debug, Deserialize, ToSchema)]
@@ -33,10 +34,15 @@ pub struct VerifyChallengeRequest {
 
 #[derive(Debug, Serialize, ToSchema)]
 pub struct AuthUserResponse {
+    #[schema(example = "8c472518-9cfe-4c5b-bb7b-8da1be2aef4d")]
+    pub id: String,
+    #[schema(example = "0x1234567890abcdef1234567890abcdef12345678")]
+    pub primary_wallet_address: String,
     #[schema(example = "0x1234567890abcdef1234567890abcdef12345678")]
     pub wallet_address: String,
-    #[schema(example = false)]
-    pub polymarket_linked: bool,
+    #[schema(example = "user@uptions.com")]
+    pub email: Option<String>,
+    pub venue_connections: Vec<VenueConnectionResponse>,
 }
 
 #[derive(Debug, Serialize, ToSchema)]
@@ -46,4 +52,34 @@ pub struct VerifyChallengeResponse {
     #[schema(example = "Bearer")]
     pub token_type: String,
     pub user: AuthUserResponse,
+}
+
+#[derive(Debug, Serialize, ToSchema)]
+pub struct VenueConnectionResponse {
+    #[schema(example = "8c472518-9cfe-4c5b-bb7b-8da1be2aef4d")]
+    pub id: String,
+    #[schema(example = "polymarket")]
+    pub venue: String,
+    #[schema(example = "0x1234567890abcdef1234567890abcdef12345678")]
+    pub account_identifier: String,
+    #[schema(example = true)]
+    pub enabled: bool,
+    pub limits: Value,
+}
+
+#[derive(Debug, Deserialize, ToSchema)]
+pub struct ConnectPolymarketRequest {
+    #[schema(example = "0x1234567890abcdef1234567890abcdef12345678")]
+    pub account_identifier: Option<String>,
+    #[schema(example = "3e8f4f1a-3be4-43ef-a9b3-df6d83cc66cc")]
+    pub api_key: String,
+    #[schema(example = "base64-secret-value")]
+    pub secret: String,
+    #[schema(example = "polymarket-passphrase")]
+    pub passphrase: String,
+    #[schema(example = "0x1234567890abcdef1234567890abcdef12345678")]
+    pub funder: Option<String>,
+    #[schema(example = 3)]
+    pub signature_type: Option<i32>,
+    pub limits: Option<Value>,
 }

@@ -28,6 +28,7 @@ pub struct WaitlistResponse {
     request_body = WaitlistUser,
     responses(
         (status = 201, description = "User joined the waitlist", body = ApiResponse<WaitlistResponse>),
+        (status = 409, description = "User already exists on the waitlist", body = ErrorResponse),
         (status = 500, description = "Database failure", body = ErrorResponse)
     )
 )]
@@ -35,7 +36,7 @@ pub async fn join_waitlist(
     State(state): State<AppState>,
     Json(payload): Json<WaitlistUser>,
 ) -> Result<(StatusCode, Json<ApiResponse<WaitlistResponse>>), AppError> {
-    let email = payload.email;
+    let email = payload.email.trim().to_lowercase();
 
     state
         .user_service

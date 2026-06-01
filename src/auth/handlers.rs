@@ -7,7 +7,8 @@ use axum::{
 use crate::{
     app::state::AppState,
     auth::dto::{
-        AuthUserResponse, CreateChallengeRequest, CreateChallengeResponse, VerifyChallengeRequest,
+        AuthUserResponse, ConnectPolymarketRequest, CreateChallengeRequest,
+        CreateChallengeResponse, VenueConnectionResponse, VerifyChallengeRequest,
         VerifyChallengeResponse,
     },
     error::{AppError, ErrorResponse},
@@ -80,7 +81,33 @@ pub async fn current_user(
     Ok(ok("Current user fetched successfully", user))
 }
 
-fn bearer_token(headers: &HeaderMap) -> Result<String, AppError> {
+#[utoipa::path(
+    post,
+    path = "/api/v1/venue-connections/polymarket",
+    tag = "Venue Connections",
+    security(("bearer_auth" = [])),
+    request_body = ConnectPolymarketRequest,
+    responses(
+        (status = 200, description = "Polymarket connection saved", body = ApiResponse<VenueConnectionResponse>),
+        (status = 400, description = "Invalid Polymarket connection payload", body = ErrorResponse),
+        (status = 401, description = "Missing or invalid bearer token", body = ErrorResponse)
+    )
+)]
+pub async fn connect_polymarket(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Json(payload): Json<ConnectPolymarketRequest>,
+) -> Result<Json<ApiResponse<VenueConnectionResponse>>, AppError> {
+    let access_token = bearer_token(&headers)?;
+    let connection = state
+        .auth_service
+        .connect_polymarket(&access_token, payload)
+        .await?;
+
+    Ok(ok("Polymarket connection saved successfully", connection))
+}
+
+pub fn bearer_token(headers: &HeaderMap) -> Result<String, AppError> {
     let header_value = headers
         .get(header::AUTHORIZATION)
         .ok_or(AppError::Unauthorized)?
