@@ -13,15 +13,26 @@ use tokio::sync::RwLock;
 use uuid::Uuid;
 
 use crate::{
-    auth::dto::{AuthUserResponse, CreateChallengeResponse, VerifyChallengeResponse},
+    auth::dto::{
+        AuthUserResponse, ConnectPolymarketRequest, CreateChallengeResponse,
+        VenueConnectionResponse, VerifyChallengeResponse,
+    },
+    db::Db,
+    entities::{auth_method, user, venue_connection},
     error::AppError,
 };
+use sea_orm::{
+    ActiveModelTrait, ColumnTrait, EntityTrait, IntoActiveModel, QueryFilter, Set,
+    sea_query::OnConflict,
+};
+use serde_json::{Value, json};
 
 const CHALLENGE_TTL_SECONDS: u64 = 300;
 
 #[derive(Clone)]
 pub struct AuthService {
     challenges: Arc<RwLock<HashMap<String, ChallengeRecord>>>,
+    db: Db,
     sessions: Arc<RwLock<HashMap<String, SessionRecord>>>,
 }
 
@@ -34,13 +45,15 @@ struct ChallengeRecord {
 
 #[derive(Clone)]
 struct SessionRecord {
+    user_id: String,
     wallet_address: String,
 }
 
 impl AuthService {
-    pub fn new() -> Self {
+    pub fn new(db: Db) -> Self {
         Self {
             challenges: Arc::new(RwLock::new(HashMap::new())),
+            db,
             sessions: Arc::new(RwLock::new(HashMap::new())),
         }
     }
@@ -99,10 +112,12 @@ impl AuthService {
             return Err(AppError::Unauthorized);
         }
 
+        let user = self.ensure_wallet_user(&wallet_address).await?;
         let access_token = Uuid::new_v4().to_string();
         self.sessions.write().await.insert(
             access_token.clone(),
             SessionRecord {
+                user_id: user.id.clone(),
                 wallet_address: wallet_address.clone(),
             },
         );
@@ -110,21 +125,190 @@ impl AuthService {
         Ok(VerifyChallengeResponse {
             access_token,
             token_type: "Bearer".to_owned(),
-            user: AuthUserResponse {
-                wallet_address,
-                polymarket_linked: false,
-            },
+            user: self.auth_user_response(&user).await?,
         })
     }
 
     pub async fn current_user(&self, access_token: &str) -> Result<AuthUserResponse, AppError> {
+        let session = self.session(access_token).await?;
+        let user = user::Entity::find_by_id(&session.user_id)
+            .one(&self.db)
+            .await?
+            .ok_or(AppError::Unauthorized)?;
+
+        Ok(self.auth_user_response(&user).await?)
+    }
+
+    pub async fn connect_polymarket(
+        &self,
+        access_token: &str,
+        payload: ConnectPolymarketRequest,
+    ) -> Result<VenueConnectionResponse, AppError> {
+        let session = self.session(access_token).await?;
+        if payload.api_key.trim().is_empty()
+            || payload.secret.trim().is_empty()
+            || payload.passphrase.trim().is_empty()
+        {
+            return Err(AppError::BadRequest(
+                "polymarket credentials are required".to_owned(),
+            ));
+        }
+
+        let account_identifier = match payload.account_identifier {
+            Some(address) => normalize_wallet_address(&address)?,
+            None => session.wallet_address,
+        };
+        let funder = payload
+            .funder
+            .map(|address| normalize_wallet_address(&address))
+            .transpose()?;
+        let signature_type = polymarket_signature_type(payload.signature_type)?;
+        let limits = payload.limits.unwrap_or_else(|| json!({}));
+        let config = json!({
+            "apiKey": payload.api_key,
+            "secret": payload.secret,
+            "passphrase": payload.passphrase,
+            "funder": funder,
+            "signatureType": signature_type
+        });
+
+        let existing = venue_connection::Entity::find()
+            .filter(venue_connection::Column::UserId.eq(&session.user_id))
+            .filter(venue_connection::Column::Venue.eq("polymarket"))
+            .one(&self.db)
+            .await?;
+
+        let connection = match existing {
+            Some(model) => {
+                let mut active = model.into_active_model();
+                active.account_identifier = Set(account_identifier);
+                active.config = Set(config);
+                active.enabled = Set(true);
+                active.limits = Set(limits);
+                active.update(&self.db).await?
+            }
+            None => {
+                venue_connection::ActiveModel {
+                    id: Set(Uuid::new_v4().to_string()),
+                    user_id: Set(session.user_id),
+                    venue: Set("polymarket".to_owned()),
+                    account_identifier: Set(account_identifier),
+                    config: Set(config),
+                    enabled: Set(true),
+                    limits: Set(limits),
+                    ..Default::default()
+                }
+                .insert(&self.db)
+                .await?
+            }
+        };
+
+        Ok(venue_connection_response(connection))
+    }
+
+    async fn session(&self, access_token: &str) -> Result<SessionRecord, AppError> {
         let sessions = self.sessions.read().await;
-        let session = sessions.get(access_token).ok_or(AppError::Unauthorized)?;
+        sessions
+            .get(access_token)
+            .cloned()
+            .ok_or(AppError::Unauthorized)
+    }
+
+    async fn ensure_wallet_user(&self, wallet_address: &str) -> Result<user::Model, AppError> {
+        if let Some(model) = user::Entity::find()
+            .filter(user::Column::PrimaryWalletAddress.eq(wallet_address))
+            .one(&self.db)
+            .await?
+        {
+            self.ensure_wallet_auth_method(&model.id, wallet_address)
+                .await?;
+            return Ok(model);
+        }
+
+        let user_id = Uuid::new_v4().to_string();
+        let model = user::ActiveModel {
+            id: Set(user_id.clone()),
+            primary_wallet_address: Set(wallet_address.to_owned()),
+            ..Default::default()
+        }
+        .insert(&self.db)
+        .await?;
+
+        self.ensure_wallet_auth_method(&user_id, wallet_address)
+            .await?;
+
+        Ok(model)
+    }
+
+    async fn ensure_wallet_auth_method(
+        &self,
+        user_id: &str,
+        wallet_address: &str,
+    ) -> Result<(), AppError> {
+        auth_method::Entity::insert(auth_method::ActiveModel {
+            id: Set(Uuid::new_v4().to_string()),
+            user_id: Set(user_id.to_owned()),
+            method_type: Set("wallet".to_owned()),
+            external_id: Set(wallet_address.to_owned()),
+            meta: Set(json!({})),
+            ..Default::default()
+        })
+        .on_conflict(
+            OnConflict::columns([
+                auth_method::Column::MethodType,
+                auth_method::Column::ExternalId,
+            ])
+            .do_nothing()
+            .to_owned(),
+        )
+        .exec(&self.db)
+        .await?;
+
+        Ok(())
+    }
+
+    async fn auth_user_response(&self, user: &user::Model) -> Result<AuthUserResponse, AppError> {
+        let venue_connections = venue_connection::Entity::find()
+            .filter(venue_connection::Column::UserId.eq(&user.id))
+            .all(&self.db)
+            .await?
+            .into_iter()
+            .map(venue_connection_response)
+            .collect();
 
         Ok(AuthUserResponse {
-            wallet_address: session.wallet_address.clone(),
-            polymarket_linked: false,
+            id: user.id.clone(),
+            primary_wallet_address: user.primary_wallet_address.clone(),
+            wallet_address: user.primary_wallet_address.clone(),
+            email: user.email.clone(),
+            venue_connections,
         })
+    }
+}
+
+fn venue_connection_response(model: venue_connection::Model) -> VenueConnectionResponse {
+    VenueConnectionResponse {
+        id: model.id,
+        venue: model.venue,
+        account_identifier: model.account_identifier,
+        enabled: model.enabled,
+        limits: redact_limits(model.limits),
+    }
+}
+
+fn redact_limits(limits: Value) -> Value {
+    limits
+}
+
+fn polymarket_signature_type(signature_type: Option<i32>) -> Result<i32, AppError> {
+    let signature_type = signature_type.unwrap_or(3);
+
+    if (0..=3).contains(&signature_type) {
+        Ok(signature_type)
+    } else {
+        Err(AppError::BadRequest(
+            "invalid polymarket signature type".to_owned(),
+        ))
     }
 }
 

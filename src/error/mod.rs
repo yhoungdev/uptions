@@ -24,6 +24,9 @@ pub enum AppError {
     BadRequest(String),
 
     #[error("{0}")]
+    Conflict(String),
+
+    #[error("{0}")]
     ExternalApiError(String),
 
     #[error("{0}")]
@@ -35,6 +38,7 @@ impl IntoResponse for AppError {
         let status = match self {
             AppError::Unauthorized => StatusCode::UNAUTHORIZED,
             AppError::BadRequest(_) => StatusCode::BAD_REQUEST,
+            AppError::Conflict(_) => StatusCode::CONFLICT,
             AppError::ExternalApiError(_) => StatusCode::BAD_GATEWAY,
             AppError::DatabaseError(_) => StatusCode::INTERNAL_SERVER_ERROR,
         };
