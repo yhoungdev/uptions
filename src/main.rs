@@ -16,7 +16,7 @@ use tracing_subscriber::{EnvFilter, fmt};
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
-    dotenvy::dotenv().ok();
+    load_env();
     init_tracing();
 
     let config = AppConfig::from_env();
@@ -33,6 +33,16 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     axum::serve(listener, app).await.expect("failed to serve");
 
     Ok(())
+}
+
+fn load_env() {
+    let manifest_env = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join(".env");
+
+    if manifest_env.exists() {
+        dotenvy::from_path(manifest_env).ok();
+    } else {
+        dotenvy::dotenv().ok();
+    }
 }
 
 fn init_tracing() {

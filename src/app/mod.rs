@@ -7,7 +7,7 @@ use axum::{
     routing::{get, post},
 };
 use tower_http::{
-    cors::{AllowOrigin, Any, CorsLayer},
+    cors::{AllowHeaders, AllowOrigin, CorsLayer},
     trace::{DefaultMakeSpan, DefaultOnRequest, DefaultOnResponse, TraceLayer},
 };
 use tracing::Level;
@@ -85,7 +85,7 @@ fn cors_layer() -> CorsLayer {
             Method::DELETE,
             Method::OPTIONS,
         ])
-        .allow_headers(Any)
+        .allow_headers(AllowHeaders::mirror_request())
 }
 
 pub fn create_app(state: AppState) -> Router {
@@ -94,13 +94,13 @@ pub fn create_app(state: AppState) -> Router {
         .route("/docs", get(swagger_ui))
         .route("/docs/openapi.json", get(openapi_json))
         .nest("/api/v1", api_v1_router())
-        .layer(cors_layer())
         .layer(
             TraceLayer::new_for_http()
                 .make_span_with(DefaultMakeSpan::new().level(Level::INFO))
                 .on_request(DefaultOnRequest::new().level(Level::INFO))
                 .on_response(DefaultOnResponse::new().level(Level::INFO)),
         )
+        .layer(cors_layer())
         .with_state(state)
 }
 
